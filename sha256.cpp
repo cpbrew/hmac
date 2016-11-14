@@ -1,16 +1,27 @@
 #include <iostream>
 #include <cstring>
-#include <cassert>
 #include <iomanip>
+#include <fstream>
+//#include <sstream>
 
 using namespace std;
 
 size_t doPreprocessing(const char *, uint32_t **);
 uint64_t getPadding(uint64_t);
+void compressionFunc(uint32_t *, uint32_t *);
+
+uint32_t rotr(uint32_t, unsigned int);
+uint32_t bigSig0(uint32_t);
+uint32_t bigSig1(uint32_t);
+uint32_t sig0(uint32_t);
+uint32_t sig1(uint32_t);
+uint32_t ch(uint32_t, uint32_t, uint32_t);
+uint32_t maj(uint32_t, uint32_t, uint32_t);
 
 void byteArrayToIntArray(uint8_t *, uint32_t *, size_t);
 void btoi(uint8_t *, uint32_t *);
 void ltob(uint64_t, uint8_t *);
+
 void usage(const char *);
 
 // The initialization vector for SHA256
@@ -35,15 +46,33 @@ const uint32_t K[64] = {0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c2
 
 int main(int argc, char *argv[])
 {
-    size_t blocks;
-    uint32_t *data;
+    size_t numWords;
+    uint32_t *data, *h;
+    ofstream f;
+//    stringstream s;
 
     if (argc != 3)
     {
         usage(argv[0]);
     }
 
-    blocks = doPreprocessing(argv[1], &data);
+    numWords = doPreprocessing(argv[1], &data);
+
+    h = new uint32_t[8];
+    memcpy(h, IV, 32);
+
+    for (unsigned int i = 0; i < numWords; i += 16)
+    {
+        compressionFunc(&(data[i]), h);
+    }
+
+    f.open(argv[2], ios::out);
+    for (int i = 0; i < 8; i++)
+    {
+        f << hex << uppercase << setw(8) << setfill('0') << h[i];
+    }
+    f << endl;
+    f.close();
 
     return 0;
 }
@@ -90,6 +119,91 @@ uint64_t getPadding(uint64_t len)
     padding = 64 - (len % 64);      // Block size is 512 bits (64 bytes)
     if (padding == 0) padding = 64; // Always pad the message, even if it starts out the correct length
     return padding;
+}
+
+// Calculate the hash of a given 512-bit (16 word) block
+void compressionFunc(uint32_t *message, uint32_t *hashValue)
+{
+    uint32_t messageSchedule[64];
+    uint32_t tmp1, tmp2;
+
+    // Initialize working variables
+    uint32_t a = hashValue[0],
+             b = hashValue[1],
+             c = hashValue[2],
+             d = hashValue[3],
+             e = hashValue[4],
+             f = hashValue[5],
+             g = hashValue[6],
+             h = hashValue[7];
+
+    // Derive the message schedule
+    memcpy(messageSchedule, message, 64);   // Copy in the first 16 words (4 bytes each, 64 bytes total)
+    for (int i = 16; i < 64; i++)
+    {
+        messageSchedule[i] = sig1(messageSchedule[i - 2]) +
+                             messageSchedule[i - 7] +
+                             sig0(messageSchedule[i - 15]) +
+                             messageSchedule[i - 16];
+    }
+
+    for (int i = 0; i < 64; i++)
+    {
+        tmp1 = h + bigSig1(e) + ch(e, f, g) + K[i] + messageSchedule[i];
+        tmp2 = bigSig0(a) + maj(a, b, c);
+        h = g;
+        g = f;
+        f = e;
+        e = d + tmp1;
+        d = c;
+        c = b;
+        b = a;
+        a = tmp1 + tmp2;
+    }
+
+    hashValue[0] += a;
+    hashValue[1] += b;
+    hashValue[2] += c;
+    hashValue[3] += d;
+    hashValue[4] += e;
+    hashValue[5] += f;
+    hashValue[6] += g;
+    hashValue[7] += h;
+}
+
+uint32_t rotr(uint32_t bits, unsigned int n)
+{
+    return (bits >> n) | (bits << (32 - n));
+}
+
+uint32_t bigSig0(uint32_t x)
+{
+    return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
+}
+
+uint32_t bigSig1(uint32_t x)
+{
+    return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25);
+}
+
+uint32_t sig0(uint32_t x)
+{
+    return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3);
+}
+
+uint32_t sig1(uint32_t x)
+{
+    return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
+}
+
+uint32_t ch(uint32_t x, uint32_t y, uint32_t z)
+{
+    return (x & y) ^ ((~x) & z);
+}
+
+uint32_t maj(uint32_t x, uint32_t y, uint32_t z)
+{
+    return (x & y) ^ (x & z) ^ (y & z);
 }
 
 // Convert an array of bytes to an array of 32-bit integers
