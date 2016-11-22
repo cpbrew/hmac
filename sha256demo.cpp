@@ -1,6 +1,7 @@
 #include <iostream>
-#include <iomanip>
+#include <cstring>
 #include <fstream>
+#include <iomanip>
 #include "sha256.h"
 
 using namespace std;
@@ -9,7 +10,7 @@ void usage(const char *);
 
 int main(int argc, char *argv[])
 {
-    uint32_t *digest;
+    uint8_t digest[32];
     fstream f;
 
     if (argc != 3)
@@ -17,14 +18,17 @@ int main(int argc, char *argv[])
         usage(argv[0]);
     }
 
-    digest = sha256(argv[1]);
+    sha256(argv[1], strlen(argv[1]), digest);
 
-    f.open(argv[2], ios::out);
-    for (int i = 0; i < 8; i++)
+    cout << "Hash value:" << endl;
+    for (int i = 0; i < 32; i++)
     {
-        f << hex << uppercase << setw(8) << setfill('0') << digest[i];
+        cout << hex << uppercase << setw(2) << setfill('0') << ((int) (digest[i] & 0xFF));
     }
-    f << endl;
+    cout << endl;
+
+    f.open(argv[2], ios::out | ios::binary);
+    f.write((const char *) digest, 32);
     f.close();
 }
 

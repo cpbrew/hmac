@@ -1,6 +1,9 @@
 #ifndef SHA256_H_INCLUDED
 #define SHA256_H_INCLUDED
 
-uint32_t *sha256(const char *);
+#include <cstdlib>
+#include <cstdint>
+
+void sha256(const char *, size_t, uint8_t *);
 
 #endif // SHA256_H_INCLUDED

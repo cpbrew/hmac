@@ -1,13 +1,12 @@
-#include <cstdint>
 #include <cstring>
 #include "sha256.h"
 
-using namespace std;
-
-size_t doPreprocessing(const char *, uint32_t **);
+// Functions for adding the padding and length to the message
+uint64_t doPreprocessing(const char *, size_t, uint32_t **);
 uint64_t getPadding(uint64_t);
-void compressionFunc(uint32_t *, uint32_t *);
 
+// Functions for the core SHA256 algorithm
+void compressionFunc(uint32_t *, uint32_t *);
 uint32_t rotr(uint32_t, unsigned int);
 uint32_t bigSig0(uint32_t);
 uint32_t bigSig1(uint32_t);
@@ -16,8 +15,11 @@ uint32_t sig1(uint32_t);
 uint32_t ch(uint32_t, uint32_t, uint32_t);
 uint32_t maj(uint32_t, uint32_t, uint32_t);
 
+// Utility functions for converting data formats
 void byteArrayToIntArray(uint8_t *, uint32_t *, size_t);
 void btoi(uint8_t *, uint32_t *);
+void intArrayToByteArray(uint32_t *, uint8_t *, size_t);
+void itob(uint32_t, uint8_t *);
 void ltob(uint64_t, uint8_t *);
 
 // The initialization vector for SHA256
@@ -40,63 +42,62 @@ const uint32_t K[64] = {0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c2
                         0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
                         0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
-uint32_t *sha256(const char *message)
+// Perform the SHA256 hash
+void sha256(const char *message, size_t msg_len, uint8_t *digest)
 {
-    size_t numWords;
-    uint32_t *data, *h;
-//    stringstream s;
+    uint64_t numWords;
+    uint32_t *m;
+    uint32_t h[8];
 
-    numWords = doPreprocessing(message, &data);
+    numWords = doPreprocessing(message, msg_len, &m);
+    memcpy(h, IV, 32);  // Initialize the hash value
 
-    h = new uint32_t[8];
-    memcpy(h, IV, 32);
-
+    // Run the compression function for each 512-bit block
     for (unsigned int i = 0; i < numWords; i += 16)
     {
-        compressionFunc(&(data[i]), h);
+        compressionFunc(&(m[i]), h);
     }
 
-    return h;
+    delete[] m;
+    intArrayToByteArray(h, digest, 32);
 }
 
 // Convert the input message to an array of 32-bit blocks, including the padding and length
 // and return the number of blocks
-size_t doPreprocessing(const char *message, uint32_t **output)
+uint64_t doPreprocessing(const char *message, size_t msg_bytes, uint32_t **output)
 {
-    uint64_t paddingBytes;
-    size_t msgBytes, totalBytes;
+    uint64_t padding_bytes, total_bytes;
     uint8_t *buffer;
 
-    msgBytes = strlen(message);
-    paddingBytes = getPadding(msgBytes);
-    totalBytes = msgBytes + paddingBytes + 8;
+    padding_bytes = getPadding(msg_bytes);
+    total_bytes = msg_bytes + padding_bytes + 8;
 
-    buffer = new uint8_t[totalBytes];
-    memcpy(buffer, message, msgBytes);
+    // Copy the original message into the new buffer
+    buffer = new uint8_t[total_bytes];
+    memcpy(buffer, message, msg_bytes);
 
     // Copy in the padding bits
-    buffer[msgBytes] = (uint8_t) 0x80;
-    for (unsigned int i = 1; i < paddingBytes; i++)
+    buffer[msg_bytes] = (uint8_t) 0x80;
+    for (unsigned int i = 1; i < padding_bytes; i++)
     {
-        buffer[(msgBytes + 1) + i] = (uint8_t) 0x00;
+        buffer[(msg_bytes + 1) + i] = (uint8_t) 0x00;
     }
 
     // Copy in the message length (in bits)
-    ltob(msgBytes * 8, &(buffer[msgBytes + paddingBytes]));
+    ltob(msg_bytes * 8, &(buffer[msg_bytes + padding_bytes]));
 
     // Convert the byte buffer to the output format
-    *output = new uint32_t[totalBytes / 4];
-    byteArrayToIntArray(buffer, *output, totalBytes);
+    *output = new uint32_t[total_bytes / 4];
+    byteArrayToIntArray(buffer, *output, total_bytes);
+    delete[] buffer;
 
-    delete buffer;
-    return totalBytes / 4;
+    return total_bytes / 4;
 }
 
 // Calculate how many padding bytes are needed for a message of a given length
 uint64_t getPadding(uint64_t len)
 {
     uint64_t padding;
-
     len += 8;                       // we're going to need an extra 64 bits (8 bytes) to store the length
     padding = 64 - (len % 64);      // Block size is 512 bits (64 bytes)
     if (padding == 0) padding = 64; // Always pad the message, even if it starts out the correct length
@@ -104,34 +105,32 @@ uint64_t getPadding(uint64_t len)
 }
 
 // Calculate the hash of a given 512-bit (16 word) block
-void compressionFunc(uint32_t *message, uint32_t *hashValue)
+void compressionFunc(uint32_t *message, uint32_t *digest)
 {
-    uint32_t messageSchedule[64];
+    uint32_t w[64];
     uint32_t tmp1, tmp2;
 
     // Initialize working variables
-    uint32_t a = hashValue[0],
-             b = hashValue[1],
-             c = hashValue[2],
-             d = hashValue[3],
-             e = hashValue[4],
-             f = hashValue[5],
-             g = hashValue[6],
-             h = hashValue[7];
+    uint32_t a = digest[0],
+             b = digest[1],
+             c = digest[2],
+             d = digest[3],
+             e = digest[4],
+             f = digest[5],
+             g = digest[6],
+             h = digest[7];
 
     // Derive the message schedule
-    memcpy(messageSchedule, message, 64);   // Copy in the first 16 words (4 bytes each, 64 bytes total)
+    memcpy(w, message, 64); // Copy in the first 16 words (4 bytes each, 64 bytes total)
     for (int i = 16; i < 64; i++)
     {
-        messageSchedule[i] = sig1(messageSchedule[i - 2]) +
-                             messageSchedule[i - 7] +
-                             sig0(messageSchedule[i - 15]) +
-                             messageSchedule[i - 16];
+        w[i] = sig1(w[i - 2]) + w[i - 7] + sig0(w[i - 15]) + w[i - 16];
     }
 
+    // Perform 64 rounds of calculations
     for (int i = 0; i < 64; i++)
     {
-        tmp1 = h + bigSig1(e) + ch(e, f, g) + K[i] + messageSchedule[i];
+        tmp1 = h + bigSig1(e) + ch(e, f, g) + K[i] + w[i];
         tmp2 = bigSig0(a) + maj(a, b, c);
         h = g;
         g = f;
@@ -143,16 +142,18 @@ void compressionFunc(uint32_t *message, uint32_t *hashValue)
         a = tmp1 + tmp2;
     }
 
-    hashValue[0] += a;
-    hashValue[1] += b;
-    hashValue[2] += c;
-    hashValue[3] += d;
-    hashValue[4] += e;
-    hashValue[5] += f;
-    hashValue[6] += g;
-    hashValue[7] += h;
+    // Compute the new hash value
+    digest[0] += a;
+    digest[1] += b;
+    digest[2] += c;
+    digest[3] += d;
+    digest[4] += e;
+    digest[5] += f;
+    digest[6] += g;
+    digest[7] += h;
 }
 
+// Utility functions defined in the SHA256 specification
 uint32_t rotr(uint32_t bits, unsigned int n)
 {
     return (bits >> n) | (bits << (32 - n));
@@ -205,6 +206,25 @@ void btoi(uint8_t *b, uint32_t *i)
     {
         *i <<= 8;
         *i |= b[j];
+    }
+}
+
+// Convert an array of 32-bit integers to an array of bytes
+void intArrayToByteArray(uint32_t *intArray, uint8_t *byteArray, size_t bytes)
+{
+    for (unsigned int i = 0; i < bytes; i += 4)
+    {
+        itob(intArray[i / 4], &(byteArray[i]));
+    }
+}
+
+// Convert a 32-bit integer to an array of bytes
+void itob(uint32_t i, uint8_t *b)
+{
+    for (int j = 3; j >= 0; j--)
+    {
+        b[j] = (uint8_t) (i & 0xFF);
+        i >>= 8;
     }
 }
 
